@@ -1,0 +1,8 @@
+__pycache__/
+.env
+.env.*
+*.pyc
+service_account.json
+node_modules/
+dist/
+.vite/
