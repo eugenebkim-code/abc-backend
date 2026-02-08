@@ -106,8 +106,10 @@ def read_sheet(sheet_name: str) -> List[Dict]:
 
 
 def parse_int(v):
+    if not v:
+        return None
     try:
-        return int(v)
+        return int(str(v).replace(",", "").strip())
     except Exception:
         return None
 
@@ -261,10 +263,6 @@ def api_cars(request: Request):
         try:
             photos = load_photos(car.get("photos_folder_id"))
             car["cover_image"] = photos[0]["url"] if photos else None
-
-            # Небольшая задержка между запросами (только для не закэшированных)
-            if i < len(cars) - 1:
-                time.sleep(0.05)
         except Exception as e:
             print(f"Error loading photos for car {car.get('id')}: {e}")
             car["cover_image"] = None
