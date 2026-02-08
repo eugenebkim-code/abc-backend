@@ -14,8 +14,9 @@ GOOGLE_SHEET_ID = "1inQlIqBzCl6aFlLQEgyZ_HGFV7F9AdVyVelEM9xjC-E"
 SERVICE_ACCOUNT_FILE = "service_account.json"
 PHOTOS_ROOT_FOLDER_ID = "1ZweBXYMDAfFB_DtTtAhIsSy2DQnipCOu"
 HERO_FOLDER_ID = "1gaPqjlItG0YZcKt78CBKIhOXenjrRSW6"
-CACHE_TTL_CARS = 300
-CACHE_TTL_META = 1800
+CACHE_TTL_CARS = 600  # 10 минут
+CACHE_TTL_META = 3600  # 1 час
+CACHE_TTL_PHOTOS = 3600  # 1 час
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -123,33 +124,53 @@ def parse_float(v):
 # DRIVE
 # =========================
 
-def load_photos(folder_id: str) -> List[Dict]:
+def load_photos(folder_id: str, max_retries: int = 3) -> List[Dict]:
     if not folder_id:
         return []
 
-    res = drive.files().list(
-        q=f"'{folder_id}' in parents and trashed = false",
-        fields="files(id, name)",
-        orderBy="name",
-    ).execute()
+    # Проверяем кэш
+    cache_key = f"photos_{folder_id}"
+    cached = get_cached(cache_key, CACHE_TTL_PHOTOS)
+    if cached:
+        return cached
 
-    photos = []
+    for attempt in range(max_retries):
+        try:
+            res = drive.files().list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                fields="files(id, name)",
+                orderBy="name",
+            ).execute()
 
-    for f in res.get("files", []):
-        name = f["name"].lower()
-        if not (
-            name.endswith(".jpg")
-            or name.endswith(".jpeg")
-            or name.endswith(".png")
-        ):
-            continue
+            photos = []
 
-        photos.append({
-            "id": f["id"],
-            "url": f"https://lh3.googleusercontent.com/d/{f['id']}=w1200",
-        })
+            for f in res.get("files", []):
+                name = f["name"].lower()
+                if not (
+                    name.endswith(".jpg")
+                    or name.endswith(".jpeg")
+                    or name.endswith(".png")
+                ):
+                    continue
 
-    return photos
+                photos.append({
+                    "id": f["id"],
+                    "url": f"https://lh3.googleusercontent.com/d/{f['id']}=w1200",
+                })
+
+            # Сохраняем в кэш
+            set_cache(cache_key, photos)
+            return photos
+
+        except Exception as e:
+            print(f"LOAD PHOTOS ERROR (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (attempt + 1))  # exponential backoff
+            else:
+                print(f"Failed to load photos for folder {folder_id} after {max_retries} attempts")
+                return []
+
+    return []
 
 def load_hero_image() -> str | None:
     try:
@@ -234,13 +255,21 @@ def api_cars(request: Request):
     cars = load_cars()
     result = []
 
-    for c in cars:
+    for i, c in enumerate(cars):
         car = dict(c)  # ← ВАЖНО: копия
 
-        photos = load_photos(car.get("photos_folder_id"))
-        car["cover_image"] = photos[0]["url"] if photos else None
-        car.pop("photos_folder_id", None)
+        try:
+            photos = load_photos(car.get("photos_folder_id"))
+            car["cover_image"] = photos[0]["url"] if photos else None
 
+            # Небольшая задержка между запросами (только для не закэшированных)
+            if i < len(cars) - 1:
+                time.sleep(0.05)
+        except Exception as e:
+            print(f"Error loading photos for car {car.get('id')}: {e}")
+            car["cover_image"] = None
+
+        car.pop("photos_folder_id", None)
         result.append(car)
 
     return result
@@ -258,9 +287,15 @@ def api_car_detail(car_id: str, request: Request):
 
     car = dict(base)  # ← копия
 
-    photos = load_photos(car.get("photos_folder_id"))
-    car["photos"] = [p["url"] for p in photos]
-    car["cover_image"] = car["photos"][0] if car["photos"] else None
+    try:
+        photos = load_photos(car.get("photos_folder_id"))
+        car["photos"] = [p["url"] for p in photos]
+        car["cover_image"] = car["photos"][0] if car["photos"] else None
+    except Exception as e:
+        print(f"Error loading photos for car {car_id}: {e}")
+        car["photos"] = []
+        car["cover_image"] = None
+
     car.pop("photos_folder_id", None)
 
     return car
