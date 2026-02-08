@@ -199,6 +199,7 @@ def load_cars():
             "year": parse_int(r.get("year")),
             "price_usd": parse_float(r.get("price_usd")),
             "price_krw": parse_float(r.get("price_krw")),
+            "mileage_km": parse_int(r.get("mileage_km")),
             "engine": r.get("engine", ""),
             "transmission": r.get("transmission", ""),
             "fuel": r.get("fuel", ""),
