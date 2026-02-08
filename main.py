@@ -40,8 +40,15 @@ app.add_middleware(
 # GOOGLE CLIENTS
 # =========================
 
-credentials = Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
+import json
+import os
+
+service_account_info = json.loads(
+    os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+)
+
+credentials = Credentials.from_service_account_info(
+    service_account_info,
     scopes=SCOPES,
 )
 
@@ -207,6 +214,10 @@ def load_cars():
 # =========================
 # API
 # =========================
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.get("/api/profile")
 def api_profile():
